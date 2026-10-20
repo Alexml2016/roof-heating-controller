@@ -1,0 +1,280 @@
+# Alarm & Roof Gateway — ETOR UART diagnostics, 2026-10-20
+# Laboratory build: validate WT32-ETH01 GPIO17/32/33 against actual header before running.
+# During bench tests disconnect mains/contactors and ETOR heater power.
+substitutions:
+  device_name: alarm-roof-gateway
+  friendly_name: "Alarm & Roof Gateway"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    priority: -100
+    then:
+      - switch.turn_off: roof_contactor
+      - switch.turn_off: etor_heater_relay
+      - switch.turn_off: etor_excitation_a
+      - switch.turn_off: etor_excitation_b
+
+esp32:
+  board: wt32-eth01
+  framework:
+    type: esp-idf
+
+logger:
+  baud_rate: 115200
+  level: INFO
+
+api:
+
+ota:
+  - platform: esphome
+
+# Temporary Wi-Fi during laboratory testing.
+# ethernet:
+#   type: LAN8720
+#   mdc_pin: GPIO23
+#   mdio_pin: GPIO18
+#   clk:
+#     pin: GPIO0
+#     mode: CLK_OUT
+#   phy_addr: 1
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+  ap:
+    ssid: "Alarm-Roof-Gateway"
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+globals:
+  - id: etor_a_forward
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_b_forward
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_a_reverse
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_b_reverse
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_signal
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_sample_seq
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+
+switch:
+  - platform: gpio
+    id: roof_contactor
+    name: "Roof heating contactor"
+    pin: GPIO4
+    restore_mode: ALWAYS_OFF
+
+  - platform: gpio
+    id: etor_heater_relay
+    name: "ETOR-55 heater"
+    pin: GPIO15
+    restore_mode: ALWAYS_OFF
+
+  # Physical GPIO32 and GPIO33 availability remains unverified.
+  - platform: gpio
+    id: etor_excitation_a
+    internal: true
+    pin: GPIO32
+    restore_mode: ALWAYS_OFF
+
+  - platform: gpio
+    id: etor_excitation_b
+    internal: true
+    pin: GPIO33
+    restore_mode: ALWAYS_OFF
+
+binary_sensor:
+  - platform: gpio
+    name: "Alarm input"
+    id: alarm_input
+    device_class: problem
+    pin:
+      number: GPIO14
+      mode:
+        input: true
+      inverted: true
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 50ms
+
+  - platform: status
+    name: "Controller online"
+
+one_wire:
+  # GPIO17 physical pin is not verified against WT32-ETH01 header.
+  - platform: gpio
+    pin: GPIO17
+    id: onewire_bus
+
+sensor:
+  - platform: dallas_temp
+    one_wire_id: onewire_bus
+    name: "Roof temperature"
+    update_interval: 10s
+
+  - platform: adc
+    id: etor_a_adc
+    internal: true
+    pin: GPIO35
+    attenuation: 12db
+    update_interval: never
+
+  - platform: adc
+    id: etor_b_adc
+    internal: true
+    pin: GPIO36
+    attenuation: 12db
+    update_interval: never
+
+  - platform: template
+    id: etor_a_forward_sensor
+    name: "ETOR A forward voltage"
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 3
+    update_interval: never
+    lambda: |-
+      return id(etor_a_forward);
+
+  - platform: template
+    id: etor_b_forward_sensor
+    name: "ETOR B forward voltage"
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 3
+    update_interval: never
+    lambda: |-
+      return id(etor_b_forward);
+
+  - platform: template
+    id: etor_a_reverse_sensor
+    name: "ETOR A reverse voltage"
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 3
+    update_interval: never
+    lambda: |-
+      return id(etor_a_reverse);
+
+  - platform: template
+    id: etor_b_reverse_sensor
+    name: "ETOR B reverse voltage"
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 3
+    update_interval: never
+    lambda: |-
+      return id(etor_b_reverse);
+
+  - platform: template
+    id: etor_signal_sensor
+    name: "ETOR differential signal"
+    accuracy_decimals: 3
+    update_interval: never
+    lambda: |-
+      return id(etor_signal);
+
+  - platform: uptime
+    name: "Controller uptime"
+    update_interval: 60s
+
+interval:
+  - interval: 10s
+    then:
+      - switch.turn_off: etor_excitation_a
+      - switch.turn_off: etor_excitation_b
+      - delay: 100ms
+
+      # Forward: A=HIGH, B=LOW.
+      - switch.turn_on: etor_excitation_a
+      - delay: 100ms
+      - component.update: etor_a_adc
+      - component.update: etor_b_adc
+      - lambda: |-
+          id(etor_a_forward) = id(etor_a_adc).state;
+          id(etor_b_forward) = id(etor_b_adc).state;
+
+      # Reverse: A=LOW, B=HIGH.
+      - switch.turn_off: etor_excitation_a
+      - switch.turn_on: etor_excitation_b
+      - delay: 100ms
+      - component.update: etor_a_adc
+      - component.update: etor_b_adc
+      - lambda: |-
+          id(etor_a_reverse) = id(etor_a_adc).state;
+          id(etor_b_reverse) = id(etor_b_adc).state;
+          const float forward = id(etor_a_forward) - id(etor_b_forward);
+          const float reverse = id(etor_a_reverse) - id(etor_b_reverse);
+          const float delta = forward - reverse;
+          id(etor_signal) = delta >= 0.0f ? delta : -delta;
+
+      # Off before reporting.
+      - switch.turn_off: etor_excitation_b
+
+      - sensor.template.publish:
+          id: etor_a_forward_sensor
+          state: !lambda "return id(etor_a_forward);"
+      - sensor.template.publish:
+          id: etor_b_forward_sensor
+          state: !lambda "return id(etor_b_forward);"
+      - sensor.template.publish:
+          id: etor_a_reverse_sensor
+          state: !lambda "return id(etor_a_reverse);"
+      - sensor.template.publish:
+          id: etor_b_reverse_sensor
+          state: !lambda "return id(etor_b_reverse);"
+      - sensor.template.publish:
+          id: etor_signal_sensor
+          state: !lambda "return id(etor_signal);"
+
+      # One ETOR_SAMPLE JSON object per completed forward+reverse cycle.
+      # Classification is explicitly UNAVAILABLE until ETOR calibration.
+      - lambda: |-
+          if (isfinite(id(etor_a_forward)) &&
+              isfinite(id(etor_b_forward)) &&
+              isfinite(id(etor_a_reverse)) &&
+              isfinite(id(etor_b_reverse)) &&
+              isfinite(id(etor_signal))) {
+            id(etor_sample_seq) += 1;
+            ESP_LOGI("etor_bench",
+              "ETOR_SAMPLE:{\"seq\":%u,"
+              "\"adc_a_forward_v\":%.4f,"
+              "\"adc_b_forward_v\":%.4f,"
+              "\"adc_a_reverse_v\":%.4f,"
+              "\"adc_b_reverse_v\":%.4f,"
+              "\"metric\":%.6f,"
+              "\"actual_state\":\"UNAVAILABLE\"}",
+              (unsigned int) id(etor_sample_seq),
+              id(etor_a_forward), id(etor_b_forward),
+              id(etor_a_reverse), id(etor_b_reverse),
+              id(etor_signal));
+          } else {
+            ESP_LOGW("etor_bench", "Invalid ADC sample; ETOR_SAMPLE skipped");
+          }
+
+button:
+  - platform: restart
+    name: "Restart controller"
