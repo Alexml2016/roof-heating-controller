@@ -1,18 +1,30 @@
-# Build and Release Folders
-bin-debug/
-bin-release/
-[Oo]bj/
-[Bb]in/
+# ESPHome build output and local runtime state
+.esphome/
+**/.esphome/
+**/build/
+**/.pioenvs/
+**/.piolibdeps/
+*.elf
+*.map
 
-# Other files and folders
-.settings/
+# Secrets and device credentials
+secrets.yaml
+**/secrets.yaml
+secrets*.local.yaml
+**/secrets*.local.yaml
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
 
-# Executables
-*.swf
-*.air
-*.ipa
-*.apk
+# Local editor / OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.bak
+*~
 
-# Project files, i.e. `.project`, `.actionScriptProperties` and `.flexProperties`
-# should NOT be excluded as they contain compiler settings and other important
-# information for Eclipse / Flash Builder.
+# Retain committed, reviewed release binaries only under releases/
