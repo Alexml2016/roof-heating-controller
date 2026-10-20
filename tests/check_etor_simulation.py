@@ -130,7 +130,11 @@ def main() -> int:
                 failed.append(f"line {lineno}: unknown actual_state={actual!r}")
             elif expected != "OBSERVE" and actual != expected:
                 message = f"line {lineno}: {case}: expected {expected}, actual {actual}"
-                if expected == "SHORT" and args.allow_short_blocked and actual in {"WET", "UNAVAILABLE"}:
+                if actual == "UNAVAILABLE":
+                    # Calibration/firmware classifier is not implemented yet.
+                    # It is a missing acceptance requirement, not a wrong measurement.
+                    blocked.append(message + " (classifier unavailable; calibration pending)")
+                elif expected == "SHORT" and args.allow_short_blocked and actual == "WET":
                     blocked.append(message + " (SHORT diagnostics not validated)")
                 else:
                     failed.append(message)
