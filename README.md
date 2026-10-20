@@ -23,7 +23,7 @@ ESPHome-based roof heating / alarm gateway using a WT32-ETH01 (ESP32) module. Th
 
 ## Repository layout
 
-- `firmware/esphome/` — ESPHome firmware configuration (pending import from the local Mac)
+- `firmware/esphome/` — ESPHome diagnostic firmware YAML, not yet hardware-validated
 - `hardware/altium/` — Altium source schematic and PCB (pending binary upload)
 - `hardware/gerber/` — fabrication outputs only after fabrication review
 - `docs/` — design notes and testing information
@@ -31,9 +31,9 @@ ESPHome-based roof heating / alarm gateway using a WT32-ETH01 (ESP32) module. Th
 
 ## Firmware migration
 
-The current working firmware is located on the development Mac as `alarm-roof-gateway.yaml`, in the ESPHome directory of an earlier, unrelated project (`courtyard-access-controller`). **It has not yet been copied to this repository.** Copy only the Alarm & Roof Gateway files, not the courtyard intercom firmware.
+The current working firmware is located on the development Mac as `alarm-roof-gateway.yaml`, in the ESPHome directory of an earlier, unrelated project (`courtyard-access-controller`). **A diagnostic copy has been imported to this repository; it needs to be compiled and tested on hardware.** Copy only the Alarm & Roof Gateway files, not the courtyard intercom firmware.
 
-The firmware has been temporarily configured for Wi-Fi instead of Ethernet during bring-up. Use `secrets.yaml.example` as a template for your *local* `secrets.yaml`; do not commit actual SSIDs/passwords, API encryption keys or OTA credentials.
+The diagnostic firmware in [`firmware/esphome/alarm-roof-gateway.yaml`](firmware/esphome/alarm-roof-gateway.yaml) has been temporarily configured for Wi-Fi instead of Ethernet during bring-up. It logs `ETOR_SAMPLE` with actual ADC readings, but uses `UNAVAILABLE` as the uncalibrated moisture classifier; all corresponding classification checks remain BLOCKED until thresholds are calibrated. Use `secrets.yaml.example` as a template for your *local* `secrets.yaml`; do not commit actual SSIDs/passwords, API encryption keys or OTA credentials.
 
 Observed during bring-up: WT32-ETH01 needs manual EN reset after MP1584 power-up. Investigate 5 V → 3.3 V startup behavior and EN reset timing before unattended operation. GPIO0 needs to be released from GND after UART flashing.
 
