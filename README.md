@@ -18,6 +18,9 @@ ESPHome-based roof heating / alarm gateway using a WT32-ETH01 (ESP32) module. Th
 
 - [Лабораторная имитация ETOR-55 резисторами](doc/etor_resistor_bench_test.md) — resistor values, ADC logging table, CSV template and automatic verification script.
 
+- [Сбор результатов ETOR через UART](doc/etor_serial_capture.md) — интерактивный запуск с Mac и формат ETOR_SAMPLE (прошивка ещё требует доработки).
+- [tests/capture_etor_serial.py](tests/capture_etor_serial.py) — программа записи реальных ADC-данных в CSV.
+
 ## Repository layout
 
 - `firmware/esphome/` — ESPHome firmware configuration (pending import from the local Mac)
