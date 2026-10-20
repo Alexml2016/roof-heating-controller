@@ -1,0 +1,11 @@
+test_case,resistance_ohm,sample,adc_a_forward_v,adc_b_forward_v,adc_a_reverse_v,adc_b_reverse_v,metric,expected_state,actual_state,notes
+open,,1,,,,,,OBSERVE,,
+dry_2m2,2200000,1,,,,,,DRY,,
+dry_1m,1000000,1,,,,,,OBSERVE,,
+trans_220k,220000,1,,,,,,OBSERVE,,
+trans_150k,150000,1,,,,,,OBSERVE,,
+trans_100k,100000,1,,,,,,OBSERVE,,
+wet_47k,47000,1,,,,,,WET,,
+wet_10k,10000,1,,,,,,WET,,
+short_47,47,1,,,,,,SHORT,,
+dry_2m2_repeat,2200000,1,,,,,,DRY,,
