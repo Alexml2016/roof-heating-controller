@@ -12,6 +12,10 @@ ESPHome-based roof heating / alarm gateway using a WT32-ETH01 (ESP32) module. Th
 
 **Safety:** This controller is used near electrical heating equipment. Verify wiring, insulation, fuse protection, contactor/relay ratings and fail-safe behavior before energizing mains equipment. Current PCB, pin assignments, strapping pins and moisture calibration are **not yet signed off as production ready**.
 
+## Technical specification and tests
+
+- [Техническое задание и методика испытаний (RU)](doc/technical_specification_and_test_plan.md) — requirements, wiring assumptions, safety gates, 28 acceptance tests and test-report template. Draft v0.1; pending hardware and firmware verification.
+
 ## Repository layout
 
 - `firmware/esphome/` — ESPHome firmware configuration (pending import from the local Mac)
