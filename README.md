@@ -16,6 +16,8 @@ ESPHome-based roof heating / alarm gateway using a WT32-ETH01 (ESP32) module. Th
 
 - [Техническое задание и методика испытаний (RU)](doc/technical_specification_and_test_plan.md) — requirements, wiring assumptions, safety gates, 28 acceptance tests and test-report template. Draft v0.1; pending hardware and firmware verification.
 
+- [Лабораторная имитация ETOR-55 резисторами](doc/etor_resistor_bench_test.md) — resistor values, ADC logging table, CSV template and automatic verification script.
+
 ## Repository layout
 
 - `firmware/esphome/` — ESPHome firmware configuration (pending import from the local Mac)
