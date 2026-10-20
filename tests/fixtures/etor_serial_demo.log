@@ -1,0 +1,2 @@
+[I][etor_bench:011]: ETOR_SAMPLE:{"seq":1,"adc_a_forward_v":2.91,"adc_b_forward_v":0.14,"adc_a_reverse_v":0.11,"adc_b_reverse_v":2.89,"metric":2.77,"actual_state":"DRY"}
+[I][etor_bench:011]: ETOR_SAMPLE:{"seq":2,"adc_a_forward_v":2.89,"adc_b_forward_v":0.12,"adc_a_reverse_v":0.13,"adc_b_reverse_v":2.88,"metric":2.75,"actual_state":"DRY"}
