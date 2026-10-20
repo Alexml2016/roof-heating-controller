@@ -253,11 +253,11 @@ interval:
       # One ETOR_SAMPLE JSON object per completed forward+reverse cycle.
       # Classification is explicitly UNAVAILABLE until ETOR calibration.
       - lambda: |-
-          if (isfinite(id(etor_a_forward)) &&
-              isfinite(id(etor_b_forward)) &&
-              isfinite(id(etor_a_reverse)) &&
-              isfinite(id(etor_b_reverse)) &&
-              isfinite(id(etor_signal))) {
+          if (std::isfinite(id(etor_a_forward)) &&
+              std::isfinite(id(etor_b_forward)) &&
+              std::isfinite(id(etor_a_reverse)) &&
+              std::isfinite(id(etor_b_reverse)) &&
+              std::isfinite(id(etor_signal))) {
             id(etor_sample_seq) += 1;
             ESP_LOGI("etor_bench",
               "ETOR_SAMPLE:{\"seq\":%u,"
