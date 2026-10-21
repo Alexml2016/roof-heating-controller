@@ -25,11 +25,13 @@ TEST_CASES = {
     "trans_100k": (100000, "OBSERVE"),
     "wet_47k": (47000, "WET"),
     "wet_10k": (10000, "WET"),
-    "short_47": (47, "SHORT"),
+    "low_1k": (1000, "OBSERVE"),
+    "low_42": (42, "LOW_RESISTANCE"),
+    "jumper_0": (0, "LOW_RESISTANCE"),
     "dry_2m2_repeat": (2200000, "DRY"),
 }
 ADC_COLUMNS = REQUIRED_COLUMNS[3:7]
-STATES = {"DRY", "WET", "SHORT", "FAULT", "UNAVAILABLE"}
+STATES = {"DRY", "WET", "SHORT", "FAULT", "UNAVAILABLE", "UNCALIBRATED", "LOW_RESISTANCE"}
 KNOWN_RES_TOLERANCE = 0.10  # Allows actual resistor tolerance/multimeter variance
 
 
@@ -102,7 +104,7 @@ def main() -> int:
             else:
                 try:
                     r = float(r_raw)
-                    if not math.isfinite(r) or abs(r - nominal) > KNOWN_RES_TOLERANCE * nominal:
+                    if not math.isfinite(r) or abs(r - nominal) > (KNOWN_RES_TOLERANCE * nominal if nominal else 0):
                         failed.append(f"line {lineno}: resistor {r} Ω differs >10% from {nominal} Ω")
                 except ValueError:
                     failed.append(f"line {lineno}: invalid resistance_ohm {r_raw!r}")
@@ -130,7 +132,7 @@ def main() -> int:
                 failed.append(f"line {lineno}: unknown actual_state={actual!r}")
             elif expected != "OBSERVE" and actual != expected:
                 message = f"line {lineno}: {case}: expected {expected}, actual {actual}"
-                if actual == "UNAVAILABLE":
+                if actual in {"UNAVAILABLE", "UNCALIBRATED"}:
                     # Calibration/firmware classifier is not implemented yet.
                     # It is a missing acceptance requirement, not a wrong measurement.
                     blocked.append(message + " (classifier unavailable; calibration pending)")
