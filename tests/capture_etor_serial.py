@@ -45,13 +45,15 @@ CASES = [
     ("trans_100k", 100000, "OBSERVE", "100 кОм"),
     ("wet_47k", 47000, "WET", "47 кОм"),
     ("wet_10k", 10000, "WET", "10 кОм"),
-    ("short_47", 47, "SHORT", "47 Ом"),
+    ("low_1k", 1000, "OBSERVE", "1 кОм"),
+    ("low_42", 42, "LOW_RESISTANCE", "42 Ом"),
+    ("jumper_0", 0, "LOW_RESISTANCE", "перемычка (0 Ом)"),
     ("dry_2m2_repeat", 2200000, "DRY", "2,2 МОм повторно"),
 ]
 CASE_BY_ID = {x[0]: x for x in CASES}
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 PREFIX = "ETOR_SAMPLE:"
-STATES = {"DRY", "WET", "SHORT", "FAULT", "UNAVAILABLE"}
+STATES = {"DRY", "WET", "SHORT", "FAULT", "UNAVAILABLE", "UNCALIBRATED", "LOW_RESISTANCE"}
 
 
 def parse_sample(line: str):
@@ -157,7 +159,7 @@ def main(argv=None):
                     except ValueError:
                         print("Неверное сопротивление; остановлено без выдумывания значения.")
                         return 2
-                    if measured is not None and (not math.isfinite(measured) or measured <= 0):
+                    if measured is not None and (not math.isfinite(measured) or measured < 0):
                         print("Неверное сопротивление; остановлено.")
                         return 2
                     input("Включите питание, дождитесь ESPHome и нажмите Enter для начала записи... ")
