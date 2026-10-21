@@ -1,5 +1,5 @@
 # Alarm & Roof Gateway — ETOR resistor-calibrated laboratory diagnostics, 2026-10-21
-# Laboratory build: validate WT32-ETH01 GPIO17/32/33 against actual header before running.
+# Laboratory build: GPIO17/OneWire confirmed on CN3; excitation GPIO32/33 verified by bench response (check PCB revision).
 # During bench tests disconnect mains/contactors and ETOR heater power.
 substitutions:
   device_name: alarm-roof-gateway
@@ -23,7 +23,7 @@ esp32:
 
 logger:
   baud_rate: 115200
-  level: INFO
+  level: DEBUG
 
 api:
 
@@ -112,7 +112,7 @@ switch:
     pin: GPIO15
     restore_mode: ALWAYS_OFF
 
-  # Physical GPIO32 and GPIO33 availability remains unverified.
+  # ETOR GPIO32/GPIO33 excitation has shown correct resistor-bench response; verify PCB connections on next revision.
   - platform: gpio
     id: etor_excitation_a
     internal: true
@@ -143,7 +143,7 @@ binary_sensor:
     name: "Controller online"
 
 one_wire:
-  # GPIO17 physical pin is not verified against WT32-ETH01 header.
+  # GPIO17 confirmed by scan of two DS18B20 sensors on CN3 (2026-10-21).
   - platform: gpio
     pin: GPIO17
     id: onewire_bus
@@ -151,7 +151,13 @@ one_wire:
 sensor:
   - platform: dallas_temp
     one_wire_id: onewire_bus
-    name: "Roof temperature"
+    address: 0x9a000000b176a128
+    name: "Boiler temperature IN"
+  - platform: dallas_temp
+    one_wire_id: onewire_bus
+    address: 0x250000005219a128
+    name: "Boiler temperature OUT"
+
     update_interval: 10s
 
   - platform: adc
