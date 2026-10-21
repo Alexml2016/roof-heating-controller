@@ -1,4 +1,4 @@
-# Alarm & Roof Gateway — ETOR UART diagnostics, 2026-10-20
+# Alarm & Roof Gateway — ETOR resistor-calibrated laboratory diagnostics, 2026-10-21
 # Laboratory build: validate WT32-ETH01 GPIO17/32/33 against actual header before running.
 # During bench tests disconnect mains/contactors and ETOR heater power.
 substitutions:
@@ -75,6 +75,29 @@ globals:
     type: uint32_t
     restore_value: no
     initial_value: "0"
+  - id: etor_resistance_kohm
+    type: float
+    restore_value: no
+    initial_value: "NAN"
+  - id: etor_state
+    type: std::string
+    restore_value: no
+    initial_value: '"UNAVAILABLE"'
+  # Deliberately disabled until real ETOR-55 wet/dry thresholds are approved.
+  - id: etor_classification_enabled
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  # Calibration parameters must be explicitly set before enabling classification.
+  # With decreasing metric, WET is entered below wet_on; DRY above dry_on.
+  - id: etor_wet_on_metric
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_dry_on_metric
+    type: float
+    restore_value: no
+    initial_value: "0.0"
 
 switch:
   - platform: gpio
@@ -197,9 +220,29 @@ sensor:
     lambda: |-
       return id(etor_signal);
 
+  - platform: template
+    id: etor_resistance_sensor
+    name: "ETOR electrode resistance (estimated)"
+    unit_of_measurement: "kΩ"
+    icon: "mdi:resistor"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+    lambda: |-
+      return id(etor_resistance_kohm);
+
   - platform: uptime
     name: "Controller uptime"
     update_interval: 60s
+
+text_sensor:
+  - platform: template
+    id: etor_state_sensor
+    name: "ETOR moisture diagnostic state"
+    icon: "mdi:water-check"
+    update_interval: never
+    lambda: |-
+      return id(etor_state);
 
 interval:
   - interval: 10s
@@ -250,8 +293,60 @@ interval:
           id: etor_signal_sensor
           state: !lambda "return id(etor_signal);"
 
+      # Bench-calibrated equivalent resistance; not a safety-rated wetness decision.
+      # Model: metric ≈ 6.6*R/(R+200kΩ) for two 100kΩ series resistors.
+      # Real R<1kΩ cannot be resolved accurately: show NaN, mark LOW_RESISTANCE.
+      # 0Ω jumper and 42Ω are indistinguishable by this ADC setup.
+      - lambda: |-
+          const float m = id(etor_signal);
+          const bool valid = std::isfinite(id(etor_a_forward)) &&
+                             std::isfinite(id(etor_b_forward)) &&
+                             std::isfinite(id(etor_a_reverse)) &&
+                             std::isfinite(id(etor_b_reverse)) &&
+                             std::isfinite(m) &&
+                             id(etor_a_forward) >= 0.0f && id(etor_a_forward) <= 3.3f &&
+                             id(etor_b_forward) >= 0.0f && id(etor_b_forward) <= 3.3f &&
+                             id(etor_a_reverse) >= 0.0f && id(etor_a_reverse) <= 3.3f &&
+                             id(etor_b_reverse) >= 0.0f && id(etor_b_reverse) <= 3.3f &&
+                             m >= 0.0f && m < 6.6f;
+          id(etor_resistance_kohm) = NAN;
+          if (!valid) {
+            id(etor_state) = "UNAVAILABLE";
+          } else if (m < 0.020f) {
+            // Bench-only divider between measured 42Ω/0Ω and 1kΩ.
+            // NOT a confirmed sensor fault or a verified short-circuit test.
+            id(etor_state) = "LOW_RESISTANCE";
+          } else {
+            const float r_kohm = 200.0f * m / (6.6f - m);
+            // Approximate range proven by resistor bench: 1kΩ ... 2.2MΩ.
+            // Do not report fictitious precision outside the verified range.
+            if (r_kohm >= 0.5f && r_kohm <= 2500.0f) {
+              id(etor_resistance_kohm) = r_kohm;
+            }
+            // Only classify real wet/dry states when explicitly calibrated.
+            const bool thresholds_valid = id(etor_classification_enabled) &&
+                id(etor_wet_on_metric) > 0.0f &&
+                id(etor_dry_on_metric) > id(etor_wet_on_metric) &&
+                id(etor_dry_on_metric) < 6.6f;
+            if (!thresholds_valid) {
+              id(etor_state) = "UNCALIBRATED";
+            } else if (m <= id(etor_wet_on_metric)) {
+              id(etor_state) = "WET";
+            } else if (m >= id(etor_dry_on_metric)) {
+              id(etor_state) = "DRY";
+            } else if (id(etor_state) != "WET" && id(etor_state) != "DRY") {
+              id(etor_state) = "UNCALIBRATED";
+            }
+          }
+      - sensor.template.publish:
+          id: etor_resistance_sensor
+          state: !lambda "return id(etor_resistance_kohm);"
+      - text_sensor.template.publish:
+          id: etor_state_sensor
+          state: !lambda "return id(etor_state);"
+
       # One ETOR_SAMPLE JSON object per completed forward+reverse cycle.
-      # Classification is explicitly UNAVAILABLE until ETOR calibration.
+      # actual_state comes from the classifier above (gated until field calibration).
       - lambda: |-
           if (std::isfinite(id(etor_a_forward)) &&
               std::isfinite(id(etor_b_forward)) &&
@@ -266,11 +361,11 @@ interval:
               "\"adc_a_reverse_v\":%.4f,"
               "\"adc_b_reverse_v\":%.4f,"
               "\"metric\":%.6f,"
-              "\"actual_state\":\"UNAVAILABLE\"}",
+              "\"actual_state\":\"%s\"}",
               (unsigned int) id(etor_sample_seq),
               id(etor_a_forward), id(etor_b_forward),
               id(etor_a_reverse), id(etor_b_reverse),
-              id(etor_signal));
+              id(etor_signal), id(etor_state).c_str());
           } else {
             ESP_LOGW("etor_bench", "Invalid ADC sample; ETOR_SAMPLE skipped");
           }
