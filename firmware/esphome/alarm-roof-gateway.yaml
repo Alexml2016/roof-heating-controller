@@ -71,6 +71,31 @@ globals:
     type: float
     restore_value: no
     initial_value: "0.0"
+  # Sampling accumulators used only by the ETOR diagnostic cycle.
+  - id: etor_sum_a
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_sum_b
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_good_samples
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: etor_rail_samples
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: etor_forward_rail_samples
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: etor_reverse_rail_samples
+    type: int
+    restore_value: no
+    initial_value: "0"
   - id: etor_sample_seq
     type: uint32_t
     restore_value: no
@@ -165,6 +190,8 @@ sensor:
     internal: true
     pin: GPIO35
     attenuation: 12db
+    samples: 4
+    sampling_mode: avg
     update_interval: never
 
   - platform: adc
@@ -172,6 +199,8 @@ sensor:
     internal: true
     pin: GPIO36
     attenuation: 12db
+    samples: 4
+    sampling_mode: avg
     update_interval: never
 
   - platform: template
@@ -257,30 +286,92 @@ interval:
       - switch.turn_off: etor_excitation_b
       - delay: 100ms
 
-      # Forward: A=HIGH, B=LOW.
+      # Sampling note: 40 samples separated by 5 ms span about 200 ms,
+      # or roughly ten periods of 50 Hz mains. This reduces pickup, but
+      # ESPHome scheduling is not phase-locked and cannot guarantee a notch.
+      # 300 ms settle time accommodates the analog RC and wet electrodes.
+      # Each ADC update also averages four hardware samples.
+      # Forward: GPIO32 HIGH, GPIO33 LOW.
       - switch.turn_on: etor_excitation_a
-      - delay: 100ms
-      - component.update: etor_a_adc
-      - component.update: etor_b_adc
+      - delay: 300ms
       - lambda: |-
-          id(etor_a_forward) = id(etor_a_adc).state;
-          id(etor_b_forward) = id(etor_b_adc).state;
+          id(etor_sum_a) = 0.0f;
+          id(etor_sum_b) = 0.0f;
+          id(etor_good_samples) = 0;
+          id(etor_rail_samples) = 0;
+      - repeat:
+          count: 40
+          then:
+            - component.update: etor_a_adc
+            - component.update: etor_b_adc
+            - lambda: |-
+                const float a = id(etor_a_adc).state;
+                const float b = id(etor_b_adc).state;
+                // Both ADC inputs at the SAME rail is not a valid low-R
+                // measurement. Avoid interpreting saturation as wetness.
+                const bool rail = ((a <= 0.20f && b <= 0.20f) ||
+                                   (a >= 3.10f && b >= 3.10f));
+                if (rail) {
+                  id(etor_rail_samples)++;
+                } else if (std::isfinite(a) && std::isfinite(b)) {
+                  id(etor_sum_a) += a;
+                  id(etor_sum_b) += b;
+                  id(etor_good_samples)++;
+                }
+            - delay: 5ms
+      - lambda: |-
+          id(etor_forward_rail_samples) = id(etor_rail_samples);
+          if (id(etor_good_samples) >= 38 &&
+              id(etor_rail_samples) <= 2) {
+            id(etor_a_forward) = id(etor_sum_a) / id(etor_good_samples);
+            id(etor_b_forward) = id(etor_sum_b) / id(etor_good_samples);
+          } else {
+            id(etor_a_forward) = NAN;
+            id(etor_b_forward) = NAN;
+          }
 
-      # Reverse: A=LOW, B=HIGH.
+      # Reverse: GPIO32 LOW, GPIO33 HIGH.
       - switch.turn_off: etor_excitation_a
       - switch.turn_on: etor_excitation_b
-      - delay: 100ms
-      - component.update: etor_a_adc
-      - component.update: etor_b_adc
+      - delay: 300ms
       - lambda: |-
-          id(etor_a_reverse) = id(etor_a_adc).state;
-          id(etor_b_reverse) = id(etor_b_adc).state;
+          id(etor_sum_a) = 0.0f;
+          id(etor_sum_b) = 0.0f;
+          id(etor_good_samples) = 0;
+          id(etor_rail_samples) = 0;
+      - repeat:
+          count: 40
+          then:
+            - component.update: etor_a_adc
+            - component.update: etor_b_adc
+            - lambda: |-
+                const float a = id(etor_a_adc).state;
+                const float b = id(etor_b_adc).state;
+                const bool rail = ((a <= 0.20f && b <= 0.20f) ||
+                                   (a >= 3.10f && b >= 3.10f));
+                if (rail) {
+                  id(etor_rail_samples)++;
+                } else if (std::isfinite(a) && std::isfinite(b)) {
+                  id(etor_sum_a) += a;
+                  id(etor_sum_b) += b;
+                  id(etor_good_samples)++;
+                }
+            - delay: 5ms
+      - lambda: |-
+          id(etor_reverse_rail_samples) = id(etor_rail_samples);
+          if (id(etor_good_samples) >= 38 &&
+              id(etor_rail_samples) <= 2) {
+            id(etor_a_reverse) = id(etor_sum_a) / id(etor_good_samples);
+            id(etor_b_reverse) = id(etor_sum_b) / id(etor_good_samples);
+          } else {
+            id(etor_a_reverse) = NAN;
+            id(etor_b_reverse) = NAN;
+          }
           const float forward = id(etor_a_forward) - id(etor_b_forward);
           const float reverse = id(etor_a_reverse) - id(etor_b_reverse);
-          const float delta = forward - reverse;
-          id(etor_signal) = delta >= 0.0f ? delta : -delta;
+          id(etor_signal) = std::abs(forward - reverse);
 
-      # Off before reporting.
+      # Disable excitation between measurement cycles.
       - switch.turn_off: etor_excitation_b
 
       - sensor.template.publish:
@@ -317,11 +408,16 @@ interval:
                              m >= 0.0f && m < 6.6f;
           id(etor_resistance_kohm) = NAN;
           if (!valid) {
-            id(etor_state) = "UNAVAILABLE";
+            id(etor_state) = "INVALID_SAMPLE";
           } else if (m < 0.020f) {
-            // Bench-only divider between measured 42Ω/0Ω and 1kΩ.
-            // NOT a confirmed sensor fault or a verified short-circuit test.
-            id(etor_state) = "LOW_RESISTANCE";
+            // A genuine very-low-R bridge should bring the two sense nodes
+            // near mid-supply (~1.65 V), not drive both to an ADC rail.
+            const bool mid_supply =
+                id(etor_a_forward) > 1.0f && id(etor_a_forward) < 2.3f &&
+                id(etor_b_forward) > 1.0f && id(etor_b_forward) < 2.3f &&
+                id(etor_a_reverse) > 1.0f && id(etor_a_reverse) < 2.3f &&
+                id(etor_b_reverse) > 1.0f && id(etor_b_reverse) < 2.3f;
+            id(etor_state) = mid_supply ? "LOW_RESISTANCE" : "INVALID_SAMPLE";
           } else {
             const float r_kohm = 200.0f * m / (6.6f - m);
             // Approximate range proven by resistor bench: 1kΩ ... 2.2MΩ.
@@ -354,12 +450,12 @@ interval:
       # One ETOR_SAMPLE JSON object per completed forward+reverse cycle.
       # actual_state comes from the classifier above (gated until field calibration).
       - lambda: |-
+          id(etor_sample_seq) += 1;
           if (std::isfinite(id(etor_a_forward)) &&
               std::isfinite(id(etor_b_forward)) &&
               std::isfinite(id(etor_a_reverse)) &&
               std::isfinite(id(etor_b_reverse)) &&
               std::isfinite(id(etor_signal))) {
-            id(etor_sample_seq) += 1;
             ESP_LOGI("etor_bench",
               "ETOR_SAMPLE:{\"seq\":%u,"
               "\"adc_a_forward_v\":%.4f,"
@@ -373,7 +469,8 @@ interval:
               id(etor_a_reverse), id(etor_b_reverse),
               id(etor_signal), id(etor_state).c_str());
           } else {
-            ESP_LOGW("etor_bench", "Invalid ADC sample; ETOR_SAMPLE skipped");
+            ESP_LOGW("etor_bench", "ETOR_INVALID_SAMPLE seq=%u forward_rail=%d/40 reverse_rail=%d/40",
+              (unsigned int) id(etor_sample_seq), id(etor_forward_rail_samples), id(etor_reverse_rail_samples));
           }
 
 button:
