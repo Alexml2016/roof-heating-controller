@@ -1,6 +1,7 @@
-# Alarm & Roof Gateway — ETOR resistor-calibrated laboratory diagnostics, 2026-10-21
+# Alarm & Roof Gateway — ETOR 5x2-sample laboratory diagnostics, 2026-10-23
 # Laboratory build: GPIO17/OneWire confirmed on CN3; excitation GPIO32/33 verified by bench response (check PCB revision).
-# During bench tests disconnect mains/contactors and ETOR heater power.
+# Laboratory-only wetness measurement; roof contactor automation disabled.
+# For electrical bench work disconnect mains/contactors and ETOR heater power.
 substitutions:
   device_name: alarm-roof-gateway
   friendly_name: "Alarm & Roof Gateway"
@@ -83,6 +84,53 @@ globals:
     type: std::string
     restore_value: no
     initial_value: '"UNAVAILABLE"'
+
+  # Five ADC readings per polarity; averages and min/max differential checks.
+  - id: etor_forward_a_sum
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_forward_b_sum
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_reverse_a_sum
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_reverse_b_sum
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_forward_diff_min
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_forward_diff_max
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_reverse_diff_min
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_reverse_diff_max
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: etor_rail_fault
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: etor_nonfinite_fault
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: etor_invalid_reason
+    type: std::string
+    restore_value: no
+    initial_value: '"NONE"'
+
   # Deliberately disabled until real ETOR-55 wet/dry thresholds are approved.
   - id: etor_classification_enabled
     type: bool
@@ -253,35 +301,83 @@ text_sensor:
 interval:
   - interval: 10s
     then:
+      # Turn excitation off before taking any readings.
       - switch.turn_off: etor_excitation_a
       - switch.turn_off: etor_excitation_b
       - delay: 100ms
-
-      # Forward: A=HIGH, B=LOW.
-      - switch.turn_on: etor_excitation_a
-      - delay: 100ms
-      - component.update: etor_a_adc
-      - component.update: etor_b_adc
       - lambda: |-
-          id(etor_a_forward) = id(etor_a_adc).state;
-          id(etor_b_forward) = id(etor_b_adc).state;
+          id(etor_forward_a_sum) = 0.0f;
+          id(etor_forward_b_sum) = 0.0f;
+          id(etor_reverse_a_sum) = 0.0f;
+          id(etor_reverse_b_sum) = 0.0f;
+          id(etor_forward_diff_min) = 10.0f;
+          id(etor_forward_diff_max) = -10.0f;
+          id(etor_reverse_diff_min) = 10.0f;
+          id(etor_reverse_diff_max) = -10.0f;
+          id(etor_rail_fault) = false;
+          id(etor_nonfinite_fault) = false;
+          id(etor_invalid_reason) = "NONE";
 
-      # Reverse: A=LOW, B=HIGH.
+      # Forward: GPIO32=HIGH, GPIO33=LOW; wait 300ms for settling.
+      - switch.turn_on: etor_excitation_a
+      - delay: 300ms
+      - repeat:
+          count: 5
+          then:
+            - component.update: etor_a_adc
+            - component.update: etor_b_adc
+            - lambda: |-
+                const float a = id(etor_a_adc).state;
+                const float b = id(etor_b_adc).state;
+                if (!std::isfinite(a) || !std::isfinite(b)) {
+                  id(etor_nonfinite_fault) = true;
+                } else {
+                  id(etor_forward_a_sum) += a;
+                  id(etor_forward_b_sum) += b;
+                  const float d = a - b;
+                  if (d < id(etor_forward_diff_min)) id(etor_forward_diff_min) = d;
+                  if (d > id(etor_forward_diff_max)) id(etor_forward_diff_max) = d;
+                  // Two ADC inputs at the same rail cannot prove electrode resistance.
+                  if ((a <= 0.18f && b <= 0.18f) ||
+                      (a >= 3.12f && b >= 3.12f)) id(etor_rail_fault) = true;
+                }
+            - delay: 40ms
+      - lambda: |-
+          id(etor_a_forward) = id(etor_forward_a_sum) / 5.0f;
+          id(etor_b_forward) = id(etor_forward_b_sum) / 5.0f;
+
+      # Reverse: GPIO32=LOW, GPIO33=HIGH.
       - switch.turn_off: etor_excitation_a
       - switch.turn_on: etor_excitation_b
-      - delay: 100ms
-      - component.update: etor_a_adc
-      - component.update: etor_b_adc
+      - delay: 300ms
+      - repeat:
+          count: 5
+          then:
+            - component.update: etor_a_adc
+            - component.update: etor_b_adc
+            - lambda: |-
+                const float a = id(etor_a_adc).state;
+                const float b = id(etor_b_adc).state;
+                if (!std::isfinite(a) || !std::isfinite(b)) {
+                  id(etor_nonfinite_fault) = true;
+                } else {
+                  id(etor_reverse_a_sum) += a;
+                  id(etor_reverse_b_sum) += b;
+                  const float d = a - b;
+                  if (d < id(etor_reverse_diff_min)) id(etor_reverse_diff_min) = d;
+                  if (d > id(etor_reverse_diff_max)) id(etor_reverse_diff_max) = d;
+                  if ((a <= 0.18f && b <= 0.18f) ||
+                      (a >= 3.12f && b >= 3.12f)) id(etor_rail_fault) = true;
+                }
+            - delay: 40ms
+      - switch.turn_off: etor_excitation_b
       - lambda: |-
-          id(etor_a_reverse) = id(etor_a_adc).state;
-          id(etor_b_reverse) = id(etor_b_adc).state;
+          id(etor_a_reverse) = id(etor_reverse_a_sum) / 5.0f;
+          id(etor_b_reverse) = id(etor_reverse_b_sum) / 5.0f;
           const float forward = id(etor_a_forward) - id(etor_b_forward);
           const float reverse = id(etor_a_reverse) - id(etor_b_reverse);
           const float delta = forward - reverse;
-          id(etor_signal) = delta >= 0.0f ? delta : -delta;
-
-      # Off before reporting.
-      - switch.turn_off: etor_excitation_b
+          id(etor_signal) = fabsf(delta);
 
       - sensor.template.publish:
           id: etor_a_forward_sensor
@@ -299,37 +395,39 @@ interval:
           id: etor_signal_sensor
           state: !lambda "return id(etor_signal);"
 
-      # Bench-calibrated equivalent resistance; not a safety-rated wetness decision.
-      # Model: metric ≈ 6.6*R/(R+200kΩ) for two 100kΩ series resistors.
-      # Real R<1kΩ cannot be resolved accurately: show NaN, mark LOW_RESISTANCE.
-      # 0Ω jumper and 42Ω are indistinguishable by this ADC setup.
+      # Averages alone are not enough: reject clipped, noisy and inconsistent cycles.
+      # Bench model: metric ≈ 6.6*R/(R+200kΩ); not a safety-rated wetness decision.
       - lambda: |-
           const float m = id(etor_signal);
-          const bool valid = std::isfinite(id(etor_a_forward)) &&
-                             std::isfinite(id(etor_b_forward)) &&
-                             std::isfinite(id(etor_a_reverse)) &&
-                             std::isfinite(id(etor_b_reverse)) &&
-                             std::isfinite(m) &&
-                             id(etor_a_forward) >= 0.0f && id(etor_a_forward) <= 3.3f &&
-                             id(etor_b_forward) >= 0.0f && id(etor_b_forward) <= 3.3f &&
-                             id(etor_a_reverse) >= 0.0f && id(etor_a_reverse) <= 3.3f &&
-                             id(etor_b_reverse) >= 0.0f && id(etor_b_reverse) <= 3.3f &&
-                             m >= 0.0f && m < 6.6f;
+          const float fd = id(etor_a_forward) - id(etor_b_forward);
+          const float rd = id(etor_a_reverse) - id(etor_b_reverse);
+          const float fs = id(etor_forward_diff_max) - id(etor_forward_diff_min);
+          const float rs = id(etor_reverse_diff_max) - id(etor_reverse_diff_min);
+          const bool finite = !id(etor_nonfinite_fault) &&
+              std::isfinite(id(etor_a_forward)) && std::isfinite(id(etor_b_forward)) &&
+              std::isfinite(id(etor_a_reverse)) && std::isfinite(id(etor_b_reverse)) &&
+              std::isfinite(m) && std::isfinite(fs) && std::isfinite(rs);
           id(etor_resistance_kohm) = NAN;
-          if (!valid) {
-            id(etor_state) = "UNAVAILABLE";
+          if (!finite || m < 0.0f || m >= 6.6f) {
+            id(etor_state) = "INVALID_SAMPLE";
+            id(etor_invalid_reason) = "NONFINITE_OR_RANGE";
+          } else if (id(etor_rail_fault)) {
+            id(etor_state) = "INVALID_SAMPLE";
+            id(etor_invalid_reason) = "BOTH_INPUTS_SAME_RAIL";
+          } else if (fs > 0.25f || rs > 0.25f) {
+            id(etor_state) = "INVALID_SAMPLE";
+            id(etor_invalid_reason) = "UNSTABLE_DIFFERENTIAL";
+          } else if (fd < -0.05f || rd > 0.05f) {
+            id(etor_state) = "INVALID_SAMPLE";
+            id(etor_invalid_reason) = "POLARITY_MISMATCH";
           } else if (m < 0.020f) {
-            // Bench-only divider between measured 42Ω/0Ω and 1kΩ.
-            // NOT a confirmed sensor fault or a verified short-circuit test.
+            // Only after ruling out rail saturation and phase inconsistency.
             id(etor_state) = "LOW_RESISTANCE";
           } else {
             const float r_kohm = 200.0f * m / (6.6f - m);
-            // Approximate range proven by resistor bench: 1kΩ ... 2.2MΩ.
-            // Do not report fictitious precision outside the verified range.
             if (r_kohm >= 0.5f && r_kohm <= 2500.0f) {
               id(etor_resistance_kohm) = r_kohm;
             }
-            // Only classify real wet/dry states when explicitly calibrated.
             const bool thresholds_valid = id(etor_classification_enabled) &&
                 id(etor_wet_on_metric) > 0.0f &&
                 id(etor_dry_on_metric) > id(etor_wet_on_metric) &&
@@ -351,30 +449,28 @@ interval:
           id: etor_state_sensor
           state: !lambda "return id(etor_state);"
 
-      # One ETOR_SAMPLE JSON object per completed forward+reverse cycle.
-      # actual_state comes from the classifier above (gated until field calibration).
+      # Preserve existing JSON fields; add quality diagnostics for each 5x2 cycle.
       - lambda: |-
-          if (std::isfinite(id(etor_a_forward)) &&
-              std::isfinite(id(etor_b_forward)) &&
-              std::isfinite(id(etor_a_reverse)) &&
-              std::isfinite(id(etor_b_reverse)) &&
-              std::isfinite(id(etor_signal))) {
-            id(etor_sample_seq) += 1;
-            ESP_LOGI("etor_bench",
-              "ETOR_SAMPLE:{\"seq\":%u,"
-              "\"adc_a_forward_v\":%.4f,"
-              "\"adc_b_forward_v\":%.4f,"
-              "\"adc_a_reverse_v\":%.4f,"
-              "\"adc_b_reverse_v\":%.4f,"
-              "\"metric\":%.6f,"
-              "\"actual_state\":\"%s\"}",
-              (unsigned int) id(etor_sample_seq),
-              id(etor_a_forward), id(etor_b_forward),
-              id(etor_a_reverse), id(etor_b_reverse),
-              id(etor_signal), id(etor_state).c_str());
-          } else {
-            ESP_LOGW("etor_bench", "Invalid ADC sample; ETOR_SAMPLE skipped");
-          }
+          id(etor_sample_seq) += 1;
+          ESP_LOGI("etor_bench",
+            "ETOR_SAMPLE:{\"seq\":%u,"
+            "\"adc_a_forward_v\":%.4f,"
+            "\"adc_b_forward_v\":%.4f,"
+            "\"adc_a_reverse_v\":%.4f,"
+            "\"adc_b_reverse_v\":%.4f,"
+            "\"metric\":%.6f,"
+            "\"forward_spread_v\":%.4f,"
+            "\"reverse_spread_v\":%.4f,"
+            "\"samples_per_polarity\":5,"
+            "\"invalid_reason\":\"%s\","
+            "\"actual_state\":\"%s\"}",
+            (unsigned int) id(etor_sample_seq),
+            id(etor_a_forward), id(etor_b_forward),
+            id(etor_a_reverse), id(etor_b_reverse),
+            id(etor_signal),
+            id(etor_forward_diff_max) - id(etor_forward_diff_min),
+            id(etor_reverse_diff_max) - id(etor_reverse_diff_min),
+            id(etor_invalid_reason).c_str(), id(etor_state).c_str());
 
 button:
   - platform: restart
